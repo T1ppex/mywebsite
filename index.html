@@ -1,15 +1,430 @@
-<html>
-    <h1>
-        Hey, I'm John
-    </h1>
-    <body>
-        <h2>About me</h2>
-        <p>
-            I am an IT coder who has an interest in games creation
-        </p>
-        <h2>What I'm working on</h2>
-        <p>
-            I'm obsessed with AI right now and training up my personal Ollama AI.
-        </p>
-    </body>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Potions Game</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+        }
+        .shelf {
+            display: flex;
+            justify-content: space-around;
+            width: 80%;
+            margin: 20px 0;
+        }
+        .vial-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .vial {
+            width: 50px;
+            height: 100px;
+            background-color: rgba(255, 255, 255, 0.5);
+            border: 2px solid black;
+            border-radius: 0 0 25px 25px;
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+        }
+        .dose {
+            position: absolute;
+            width: 100%;
+            height: 25%;
+            transition: top 0.5s;
+        }
+        .dose.selected {
+            border: 2px solid white;
+            box-sizing: border-box;
+        }
+        #shuffleCount, #gameStatus, #scoreboard {
+            margin-top: 20px;
+        }
+        .selected {
+            border: 2px solid gold;
+        }
+        .indicator {
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        .tick {
+            color: green;
+        }
+        .cross {
+            color: red;
+        }
+        .indicator.won {
+            color: gold;
+            font-weight: bold;
+        }
+        .indicator.lost {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Potions Game</h1>
+    <div class="shelf" id="topShelf"></div>
+    <div class="shelf" id="bottomShelf"></div>
+    <div id="shuffleCount"></div>
+    <div id="gameStatus"></div>
+    <div id="scoreboard"></div>
+    <button id="retryButton" onclick="retryGame()" style="display: none;">Retry</button>
+    <button id="newGameButton" onclick="startNewGame()" style="display: none;">New Game?</button>
+
+    <script>
+        const numberOfVials = 5;
+        const numberOfDoses = 4;
+        const colors = ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF', '#00FFFF', '#FFA500', '#800080', '#008000', '#FFC0CB'];
+        let vials = [];
+        let originalColors = [];
+        let shuffleCount = 0;
+        let isShuffling = false;
+        let selectedVial = null;
+        let selectedDoses = [];
+        let gameStarted = false;
+        let initialState = [];
+        let gamesWon = 0;
+        let gamesLost = 0;
+        let gameStatus = 'ongoing'; // New variable to track game status: 'ongoing', 'won', or 'lost'
+
+        function createVials(shelfId) {
+            const shelf = document.getElementById(shelfId);
+            for (let i = 0; i < numberOfVials; i++) {
+                const vialContainer = document.createElement('div');
+                vialContainer.className = 'vial-container';
+                
+                const indicator = document.createElement('div');
+                indicator.className = 'indicator';
+                vialContainer.appendChild(indicator);
+                
+                const vial = document.createElement('div');
+                vial.className = 'vial';
+                vial.dataset.index = vials.length.toString();
+                vial.onclick = () => selectVial(parseInt(vial.dataset.index));
+                vialContainer.appendChild(vial);
+                
+                const doses = [];
+                if (!(shelfId === 'topShelf' && i === numberOfVials - 1) && 
+                    !(shelfId === 'bottomShelf' && i === numberOfVials - 1)) {
+                    for (let j = 0; j < numberOfDoses; j++) {
+                        doses.push(colors[vials.length]);
+                    }
+                    originalColors.push(colors[vials.length]);
+                } else {
+                    originalColors.push(null);
+                }
+                
+                shelf.appendChild(vialContainer);
+                vials.push(doses);
+            }
+        }
+
+        function updateVialDisplay() {
+            const allVials = document.querySelectorAll('.vial');
+            const allIndicators = document.querySelectorAll('.indicator');
+            vials.forEach((vial, index) => {
+                const vialElement = allVials[index];
+                const indicatorElement = allIndicators[index];
+                if (vialElement && indicatorElement) {
+                    vialElement.innerHTML = '';
+                    vial.forEach((color, doseIndex) => {
+                        const dose = document.createElement('div');
+                        dose.className = 'dose';
+                        dose.style.backgroundColor = color;
+                        dose.style.top = `${(numberOfDoses - doseIndex - 1) * 25}%`;
+                        vialElement.appendChild(dose);
+                    });
+                    
+                    // Update indicator
+                    if (gameStarted) {
+                        if (gameStatus === 'won') {
+                            indicatorElement.textContent = 'WON';
+                            indicatorElement.className = 'indicator won';
+                        } else if (gameStatus === 'lost') {
+                            indicatorElement.textContent = 'LOST';
+                            indicatorElement.className = 'indicator lost';
+                        } else {
+                            if (vial.length === 0 || (vial.length === numberOfDoses && vial.every(dose => dose === vial[0]))) {
+                                indicatorElement.textContent = '✓';
+                                indicatorElement.className = 'indicator tick';
+                            } else {
+                                indicatorElement.textContent = '✗';
+                                indicatorElement.className = 'indicator cross';
+                            }
+                        }
+                    } else {
+                        indicatorElement.textContent = '';
+                    }
+                }
+            });
+        }
+
+        function shufflePotions() {
+            shuffleCount++;
+            document.getElementById('shuffleCount').textContent = `Shuffle count: ${shuffleCount}`;
+
+            // First, fill the empty vials
+            const emptyVials = vials.filter(vial => vial.length === 0);
+            const filledVials = vials.filter(vial => vial.length > 0);
+
+            emptyVials.forEach(emptyVial => {
+                while (emptyVial.length < numberOfDoses) {
+                    const availableVials = filledVials.filter(vial => vial.length > 0);
+                    if (availableVials.length === 0) break;
+
+                    const sourceVial = availableVials[Math.floor(Math.random() * availableVials.length)];
+                    const dosesToMove = Math.min(Math.floor(Math.random() * 2) + 1, sourceVial.length, numberOfDoses - emptyVial.length);
+
+                    const movedDoses = sourceVial.splice(sourceVial.length - dosesToMove, dosesToMove);
+                    emptyVial.unshift(...movedDoses);
+                }
+            });
+
+            // Now, redistribute doses from previously empty vials
+            const previouslyEmptyVials = vials.filter((vial, index) => originalColors[index] === null);
+            previouslyEmptyVials.forEach(vial => {
+                while (vial.length > 0) {
+                    const dose = vial.pop();
+                    const availableVials = vials.filter((v, index) => 
+                        v.length < numberOfDoses && 
+                        originalColors[index] !== dose && 
+                        index !== vials.indexOf(vial)
+                    );
+
+                    if (availableVials.length === 0) {
+                        vial.unshift(dose);
+                        break;
+                    }
+
+                    const targetVial = availableVials[Math.floor(Math.random() * availableVials.length)];
+                    targetVial.unshift(dose);
+                }
+            });
+
+            updateVialDisplay();
+        }
+
+        function hasAdjacentMatchingColors() {
+            return vials.some(vial => {
+                for (let i = 1; i < vial.length; i++) {
+                    if (vial[i] === vial[i - 1]) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+        }
+
+        function checkWinCondition() {
+            const filledVials = vials.filter(vial => vial.length === numberOfDoses && vial.every(dose => dose === vial[0]));
+            const emptyVials = vials.filter(vial => vial.length === 0);
+            return filledVials.length === vials.length - 2 && emptyVials.length === 2;
+        }
+
+        function startShuffleProcess() {
+            if (isShuffling) return;
+            isShuffling = true;
+            gameStarted = false;
+            document.getElementById('gameStatus').textContent = 'Shuffling...';
+            shuffleCount = 0;
+
+            function shuffle() {
+                shufflePotions();
+
+                if (hasAdjacentMatchingColors() || vials.filter(vial => vial.length === 0).length !== 2) {
+                    setTimeout(shuffle, 10); // Continue shuffling
+                } else {
+                    isShuffling = false;
+                    gameStarted = true;
+                    document.getElementById('gameStatus').textContent = `Shuffling complete. You can now start pouring!`;
+                    initialState = JSON.parse(JSON.stringify(vials)); // Store initial state
+                    updateVialDisplay(); // Update display to add indicators
+                }
+            }
+
+            shuffle();
+        }
+
+        function selectVial(index) {
+            if (isShuffling || !gameStarted) return;
+
+            if (index < 0 || index >= vials.length) {
+                console.error('Invalid vial index:', index);
+                return;
+            }
+
+            const allVials = Array.from(document.querySelectorAll('.vial'));
+            
+            if (selectedVial === null) {
+                // Selecting source vial
+                selectedVial = index;
+                const vialElement = allVials[index];
+                if (vialElement) {
+                    vialElement.classList.add('selected');
+                    selectDoses(vialElement, vials[index]);
+                } else {
+                    console.error('Vial element not found for index:', index);
+                }
+            } else {
+                // Attempting to pour
+                const sourceVial = vials[selectedVial];
+                const targetVial = vials[index];
+
+                if (selectedVial !== index && canPour(sourceVial, targetVial)) {
+                    pour(sourceVial, targetVial);
+                    updateVialDisplay();
+                    checkGameState();
+                }
+
+                // Deselect vials and doses
+                const selectedVialElement = allVials[selectedVial];
+                if (selectedVialElement) {
+                    selectedVialElement.classList.remove('selected');
+                    deselectDoses(selectedVialElement);
+                }
+                selectedVial = null;
+                selectedDoses = [];
+            }
+        }
+
+        function selectDoses(vialElement, vial) {
+            const doseElements = vialElement.querySelectorAll('.dose');
+            if (vial.length > 0) {
+                const topColor = vial[vial.length - 1];
+                let count = 0;
+                for (let i = vial.length - 1; i >= 0; i--) {
+                    if (vial[i] === topColor) {
+                        doseElements[i].classList.add('selected');
+                        count++;
+                    } else {
+                        break;
+                    }
+                }
+                selectedDoses = vial.slice(-count);
+            }
+        }
+
+        function deselectDoses(vialElement) {
+            const doseElements = vialElement.querySelectorAll('.dose');
+            doseElements.forEach(dose => dose.classList.remove('selected'));
+        }
+
+        function canPour(sourceVial, targetVial) {
+            if (selectedDoses.length === 0 || targetVial.length === numberOfDoses) return false;
+            if (targetVial.length === 0) return true;
+            return selectedDoses[0] === targetVial[targetVial.length - 1] && 
+                   targetVial.length + selectedDoses.length <= numberOfDoses;
+        }
+
+        function pour(sourceVial, targetVial) {
+            while (selectedDoses.length > 0 && targetVial.length < numberOfDoses) {
+                targetVial.push(sourceVial.pop());
+                selectedDoses.pop();
+            }
+        }
+
+        function isGameLost() {
+            const emptyVials = vials.filter(vial => vial.length === 0);
+            if (emptyVials.length > 0) return false;
+
+            for (let i = 0; i < vials.length; i++) {
+                const sourceVial = vials[i];
+                if (sourceVial.length === 0) continue;
+
+                const topColor = sourceVial[sourceVial.length - 1];
+                let movableDoses = 0;
+                for (let j = sourceVial.length - 1; j >= 0; j--) {
+                    if (sourceVial[j] === topColor) {
+                        movableDoses++;
+                    } else {
+                        break;
+                    }
+                }
+
+                for (let k = 0; k < vials.length; k++) {
+                    if (i !== k) {
+                        const targetVial = vials[k];
+                        if (targetVial.length === 0 || 
+                            (targetVial[targetVial.length - 1] === topColor && 
+                             targetVial.length + movableDoses <= numberOfDoses)) {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        function checkGameState() {
+            if (checkWinCondition()) {
+                gameStatus = 'won';
+                document.getElementById('gameStatus').textContent = 'You Have Won!';
+                gamesWon++;
+                updateScoreboard();
+                document.getElementById('newGameButton').style.display = 'block';
+            } else if (isGameLost()) {
+                gameStatus = 'lost';
+                gamesLost++; // Increment gamesLost counter
+                updateScoreboard(); // Update the scoreboard immediately
+                document.getElementById('gameStatus').textContent = 'No valid moves. Retry?';
+                document.getElementById('retryButton').style.display = 'block';
+            } else {
+                gameStatus = 'ongoing';
+            }
+            updateVialDisplay(); // Update the display to reflect the new game status
+        }
+
+function retryGame() {
+    vials = JSON.parse(JSON.stringify(initialState)); // Restore initial state
+    selectedVial = null;
+    selectedDoses = [];
+    gameStatus = 'ongoing'; // Reset game status
+    document.getElementById('retryButton').style.display = 'none';
+    document.getElementById('gameStatus').textContent = 'Game restarted. Good luck!';
+    updateVialDisplay();
+}
+
+function startNewGame() {
+    vials = [];
+    originalColors = [];
+    shuffleCount = 0;
+    isShuffling = false;
+    selectedVial = null;
+    selectedDoses = [];
+    gameStarted = false;
+    initialState = [];
+    gameStatus = 'ongoing'; // Reset game status
+    
+    // Clear existing vials
+    document.getElementById('topShelf').innerHTML = '';
+    document.getElementById('bottomShelf').innerHTML = '';
+    
+    // Create new vials
+    createVials('topShelf');
+    createVials('bottomShelf');
+    
+    // Start new game
+    document.getElementById('newGameButton').style.display = 'none';
+    document.getElementById('gameStatus').textContent = 'Starting new game...';
+    startShuffleProcess();
+}
+
+        function updateScoreboard() {
+            document.getElementById('scoreboard').textContent = `Games Won: ${gamesWon} | Games Lost: ${gamesLost}`;
+        }
+
+        createVials('topShelf');
+        createVials('bottomShelf');
+        updateScoreboard();
+        startShuffleProcess();
+    </script>
+</body>
 </html>
